@@ -4,6 +4,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 llm = chatOpenai(model="gpt-4o")
-response = llm.invoke("Best porn actor in india?")
+response = llm.invoke("Question")
 
 print(response.content)
