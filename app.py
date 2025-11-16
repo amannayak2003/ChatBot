@@ -1,14 +1,21 @@
+from platform import system
+
 import streamlit as st
 import os
-import uuid
-
+import time
 from utils.loader import PDFLoader
 from utils.cleaner import TextCleaner
 from utils.chunker import TextChunker
 from utils.embedding import EmbeddingGenerator
 from utils.vectorstore import VectorStore
-
+from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
+from langchain_core.prompts import ChatPromptTemplate
+
+
+load_dotenv()
+
+llm = ChatOpenAI(model="gpt-4o-mini")
 
 def generate_rag_answer(query, vectorstore):
     # 1. Retrieve top chunks
@@ -34,110 +41,114 @@ def generate_rag_answer(query, vectorstore):
     response = llm.invoke(prompt)
 
     return response.content
-# --------------------------------------------------------------------------------
 
-st.set_page_config(page_title="AI Research Assistant", layout="wide")
 
-# --------------------------------------------------------------------------------
-# Initialize VectorStore once (important)
-# --------------------------------------------------------------------------------
+st.set_page_config(page_title="AI Assistant", layout="wide")
+
 if "vectorstore" not in st.session_state:
     print("Initializing VectorStore...")
     st.session_state["vectorstore"] = VectorStore()
 
-# --------------------------------------------------------------------------------
-# SIDEBAR UI
-# --------------------------------------------------------------------------------
 with st.sidebar:
     st.title("📄 Documents")
     uploaded_files = st.file_uploader(
-        "Upload Research PDFs",
-        type=["pdf"],
+        "Upload PDFs or Text files",
+        type=["pdf","docx","txt"],
         accept_multiple_files=True
     )
 
-    if st.button("Process Documents"):
+    if st.button("Continue"):
         if uploaded_files:
             st.session_state["process_docs"] = True
         else:
-            st.warning("Please upload at least one PDF.")
+            st.toast("Please upload at least one document.", icon="⚠️")
 
-# --------------------------------------------------------------------------------
-# MAIN TITLE
-# --------------------------------------------------------------------------------
-st.title("📚 AI Research Assistant")
+st.title("📚 AI Assistant")
 
 tab_chat, tab_summary, tab_citations = st.tabs(["💬 Chat", "📝 Summary", "📌 Citations"])
 
-# --------------------------------------------------------------------------------
-# PROCESSING PIPELINE
-# --------------------------------------------------------------------------------
-if st.session_state.get("process_docs"):
+if st.session_state.get("process_docs", False):
+    status_placeholder = st.empty()
+    # START STATUS
+    with status_placeholder.status("Processing your documents...", expanded=False) as status:
 
-    st.info("Processing documents... Please wait.")
+        # 1. Create folder
+        os.makedirs("uploaded_pdfs", exist_ok=True)
 
-    # 0. Create unique directory for uploaded PDFs
-    if not os.path.exists("uploaded_pdfs"):
-        os.makedirs("uploaded_pdfs")   
+        # 2. Save PDFs
+        pdf_paths = []
+        for f in uploaded_files:
+            path = f"uploaded_pdfs/{f.name}"
+            with open(path, "wb") as pdf:
+                pdf.write(f.read())
+            pdf_paths.append(path)
 
-    # 1. Save uploaded PDFs
-    pdf_paths = []
-    for f in uploaded_files:
-        path = f"uploaded_pdfs/{f.name}"
-        with open(path, "wb") as pdf:
-            pdf.write(f.read())
-        pdf_paths.append(path)
+        # 3. Load
+        loader = PDFLoader(pdf_paths)
+        docs = loader.load_pdfs()
 
-    print("PDFs saved locally:", pdf_paths)
+        # 4. Clean & chunk
+        cleaner = TextCleaner()
+        chunker = TextChunker()
 
-    # 2. Load PDFs
-    print("Loading PDFs...")
-    loader = PDFLoader(pdf_paths)
-    docs = loader.load_pdfs()
-    print("Loaded documents count:", len(docs))
+        chunks = []
+        for d in docs:
+            clean = cleaner.clean(d["text"])
+            chunks.extend(chunker.chunk_text(clean))
 
-    # 3. Clean + Chunk
-    print("Cleaning and chunking...")
-    cleaner = TextCleaner()
-    chunker = TextChunker()
+        # Prevent crash
+        if len(chunks) == 0:
+            status.update(label="❌ No text found. Cannot process.", state="error")
+            st.session_state["process_docs"] = False
+            st.stop()
 
-    chunks = []
-    for d in docs:
-        clean_text = cleaner.clean(d["text"])
-        file_chunks = chunker.chunk_text(clean_text)
-        chunks.extend(file_chunks)
+        # 5. Embed
+        embedder = EmbeddingGenerator()
+        embeddings = embedder.embed(chunks)
 
-    print("Total chunks generated:", len(chunks))
+        # 6. Store
+        store = st.session_state["vectorstore"]
+        store.add(chunks)
 
-    # 4. Embed & Store
-    print("Generating embeddings...")
-    embedder = EmbeddingGenerator()
-    embeddings = embedder.embed(chunks)
-    print("Embedding generation complete.")
+        # SUCCESS MESSAGE (THIS WILL SHOW!)
+        status.update(
+            label="Documents processed successfully!",
+            state="complete"
+        )
 
-    # 4. Store in FAISS Vector DB
-    print("Adding embeddings to vector DB (FAISS)...")
-    store = st.session_state["vectorstore"]
-    store.add(chunks)
-    print("Embeddings added successfully!")
+        time.sleep(1.5)
 
+        status_placeholder.empty()
 
-
-    print("Database storage complete.")
-
-    # Final success
-    st.success("🎉 Documents processed successfully!")
+    # Set values AFTER status finishes (outside status block)
     st.session_state["chunks"] = chunks
+    st.session_state["process_docs"] = False
 
-# -----------------------------------
-# CHAT TAB
-# -----------------------------------
+prompt = ChatPromptTemplate.from_messages([
+    ("system",
+     "You are a creative branding expert. Your job is to craft short, catchy, and modern subheadings for digital products. "
+     "Make it sound premium, memorable, and friendly. Output only the subheading, without quotes."),
+
+    ("human",
+     "Create a cool subheading for my AI chatbot that helps users with answers, assistance, and conversations.")
+])
+
+
+formatted_messages = prompt.format_messages()
+
+
+response = llm.invoke(formatted_messages)
+
+subHeader = response.content.strip('"')
+
+
+
 with tab_chat:
-    st.subheader("Ask a Question")
+    st.subheader(subHeader)
 
-    question = st.text_input("Enter your query:")
+    question = st.text_input("Ask anything")
 
-    if st.button("Get Answer"):
+    if st.button("Ask"):
         if not question.strip():
             st.warning("Please enter a question.")
         else:
@@ -145,12 +156,9 @@ with tab_chat:
                 store = st.session_state["vectorstore"]
                 answer = generate_rag_answer(question, store)
 
-            st.write("### 📘 Answer:")
+            st.write("Answer:")
             st.write(answer)
 
-            st.write("### 🔍 Context Used:")
-            for chunk in store.search(question, top_k=3):
-                st.info(chunk)
 # --------------------------------------------------------------------------------
 # SUMMARY TAB
 # --------------------------------------------------------------------------------
