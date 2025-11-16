@@ -1,13 +1,10 @@
 streamlit
 langchain==0.2.12
+langchain-core==0.2.27
 langchain-community==0.2.10
-langchain-core==0.2.26
-langchain-openai==0.1.7
-
+langchain-openai==0.1.8
 openai
 tiktoken
-
 faiss-cpu
-
 pypdf
 python-dotenv
