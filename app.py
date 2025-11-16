@@ -76,6 +76,10 @@ if st.session_state.get("process_docs"):
 
     st.info("Processing documents... Please wait.")
 
+    # 0. Create unique directory for uploaded PDFs
+    if not os.path.exists("uploaded_pdfs"):
+        os.makedirs("uploaded_pdfs")   
+
     # 1. Save uploaded PDFs
     pdf_paths = []
     for f in uploaded_files:
