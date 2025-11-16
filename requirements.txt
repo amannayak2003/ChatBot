@@ -1,8 +1,13 @@
-langchain
-langchain-community
+streamlit
+langchain==0.2.12
+langchain-community==0.2.10
+langchain-core==0.2.26
+langchain-openai==0.1.7
+
 openai
-chromadb
-pypdf
 tiktoken
+
 faiss-cpu
+
+pypdf
 python-dotenv
