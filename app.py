@@ -1,21 +1,21 @@
-from platform import system
-
-import streamlit as st
 import os
 import time
-from utils.loader import PDFLoader
-from utils.cleaner import TextCleaner
-from utils.chunker import TextChunker
-from utils.embedding import EmbeddingGenerator
-from utils.vectorstore import VectorStore
-from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-from langchain_core.prompts import ChatPromptTemplate
 
+import streamlit as st
+from dotenv import load_dotenv
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+
+from utils.chunker import TextChunker
+from utils.cleaner import TextCleaner
+from utils.embedding import EmbeddingGenerator
+from utils.loader import PDFLoader
+from utils.vectorstore import VectorStore
 
 load_dotenv()
 
 llm = ChatOpenAI(model="gpt-4o-mini")
+
 
 def generate_rag_answer(query, vectorstore):
     # 1. Retrieve top chunks
@@ -43,6 +43,33 @@ def generate_rag_answer(query, vectorstore):
     return response.content
 
 
+def generate_summary(chunks, summary_type="detailed"):
+    # Join all chunks into a single text block
+    full_text = "\n\n".join(chunks)
+
+    prompt = f"""
+You are an AI Research Assistant specialized in summarization.
+
+Summarize the following document.
+
+Summary type: {summary_type}
+
+DOCUMENT CONTENT:
+{full_text}
+
+Rules:
+- Do NOT add extra information.
+- Keep the summary clean and structured.
+- If summary_type = "bullet", return bullet points.
+- If short, keep within 150 words.
+- If detailed, keep within 500 words.
+"""
+
+    result = llm.invoke(prompt)
+
+    return result.content.strip()
+
+
 st.set_page_config(page_title="AI Assistant", layout="wide")
 
 if "vectorstore" not in st.session_state:
@@ -53,7 +80,7 @@ with st.sidebar:
     st.title("📄 Documents")
     uploaded_files = st.file_uploader(
         "Upload PDFs or Text files",
-        type=["pdf","docx","txt"],
+        type=["pdf", "docx", "txt"],
         accept_multiple_files=True
     )
 
@@ -65,7 +92,7 @@ with st.sidebar:
 
 st.title("📚 AI Assistant")
 
-tab_chat, tab_summary, tab_citations = st.tabs(["💬 Chat", "📝 Summary", "📌 Citations"])
+tab_chat, tab_summary = st.tabs(["💬 Chat", "📝 Summary"])
 
 if st.session_state.get("process_docs", False):
     status_placeholder = st.empty()
@@ -133,15 +160,11 @@ prompt = ChatPromptTemplate.from_messages([
      "Create a cool subheading for my AI chatbot that helps users with answers, assistance, and conversations.")
 ])
 
-
 formatted_messages = prompt.format_messages()
-
 
 response = llm.invoke(formatted_messages)
 
 subHeader = response.content.strip('"')
-
-
 
 with tab_chat:
     st.subheader(subHeader)
@@ -159,16 +182,25 @@ with tab_chat:
             st.write("Answer:")
             st.write(answer)
 
-# --------------------------------------------------------------------------------
-# SUMMARY TAB
-# --------------------------------------------------------------------------------
 with tab_summary:
     st.subheader("Document Summary")
-    st.info("Summary will appear here after we integrate the summarizer agent.")
+    if "chunks" not in st.session_state:
+        st.info("Upload and process a document first.")
+    else:
+        summary_type = st.selectbox(
+            "Choose summary type",
+            ["short", "detailed", "bullet"]
+        )
 
-# --------------------------------------------------------------------------------
-# CITATIONS TAB
-# --------------------------------------------------------------------------------
-with tab_citations:
-    st.subheader("Citations")
-    st.info("Citations will be extracted after we integrate the citation agent.")
+        if st.button("Generate Summary"):
+            with st.spinner("Generating summary..."):
+                summary_text = generate_summary(
+                    st.session_state["chunks"],
+                    summary_type
+                )
+                st.session_state["summary"] = summary_text
+
+        if "summary" in st.session_state:
+            st.write("Summary Result")
+            st.write(st.session_state["summary"])
+
