@@ -16,32 +16,39 @@ load_dotenv()
 
 llm = ChatOpenAI(model="gpt-4o-mini")
 
+if "chat_history" not in st.session_state:
+    st.session_state["chat_history"] = []
 
-def generate_rag_answer(query, vectorstore):
-    # 1. Retrieve top chunks
+def generate_rag_answer(query, vectorstore, history):
+    # Prepare chat history as text
+    history_text = "\n".join(
+        [f"{msg['role'].upper()}: {msg['content']}" for msg in history]
+    )
+
     results = vectorstore.search(query, top_k=3)
     context = "\n\n".join(results) if results else "No relevant context found."
 
-    # 2. Build RAG prompt
     prompt = f"""
-    You are an AI Research Assistant.
-    Use ONLY the context below to answer the question.
+    You are an AI RAG Assistant.
 
-    CONTEXT:
+    Use ONLY the context below + conversation history to answer.
+
+    === RAG CONTEXT ===
     {context}
 
-    QUESTION:
+    === CHAT HISTORY ===
+    {history_text}
+
+    === USER QUESTION ===
     {query}
 
-    Answer clearly, concisely, and factually.
+    Provide a helpful and contextual reply.
     """
 
-    # 3. LLM call
     llm = ChatOpenAI(model="gpt-4o-mini")
     response = llm.invoke(prompt)
 
     return response.content
-
 
 def generate_summary(chunks, summary_type="detailed"):
     # Join all chunks into a single text block
@@ -68,7 +75,6 @@ Rules:
     result = llm.invoke(prompt)
 
     return result.content.strip()
-
 
 st.set_page_config(page_title="AI Assistant", layout="wide")
 
@@ -169,18 +175,43 @@ subHeader = response.content.strip('"')
 with tab_chat:
     st.subheader(subHeader)
 
-    question = st.text_input("Ask anything")
+    st.write("### Conversation")
 
+    # Show chat history
+    for msg in st.session_state["chat_history"]:
+        if msg["role"] == "user":
+            st.write(f"**You:** {msg['content']}")
+        else:
+            st.write(f"**AI:** {msg['content']}")
+
+    st.divider()
+
+    # Text input with session key
+    question = st.text_input("Ask anything", key="chat_input")
+
+    # Ask button triggers callback AFTER sending
     if st.button("Ask"):
         if not question.strip():
             st.warning("Please enter a question.")
         else:
             with st.spinner("Generating answer..."):
                 store = st.session_state["vectorstore"]
-                answer = generate_rag_answer(question, store)
+                answer = generate_rag_answer(
+                    question,
+                    store,
+                    st.session_state["chat_history"]
+                )
 
-            st.write("Answer:")
-            st.write(answer)
+            # Save chat
+            st.session_state["chat_history"].append({"role": "user", "content": question})
+            st.session_state["chat_history"].append({"role": "assistant", "content": answer})
+
+            # Refresh UI
+            st.rerun()
+
+
+
+
 
 with tab_summary:
     st.subheader("Document Summary")
